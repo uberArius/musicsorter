@@ -7,6 +7,7 @@ import zipfile
 root = pathlib.Path(__file__).resolve().parents[1]
 target = root / 'licenses'
 target.mkdir(exist_ok=True)
+(root / '.tools').mkdir(exist_ok=True)
 sources = []
 for module in ('qtbase', 'qtmultimedia', 'qtsvg'):
     url = f'https://github.com/qt/{module}/archive/refs/tags/v6.10.2.zip'

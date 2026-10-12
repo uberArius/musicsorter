@@ -30,6 +30,7 @@ Plugins=.
 foreach ($required in @('MusicSorter.exe','Qt6Core.dll','Qt6Widgets.dll','Qt6Multimedia.dll','platforms\qwindows.dll','multimedia\ffmpegmediaplugin.dll','avcodec-61.dll','avformat-61.dll','avutil-59.dll','swresample-5.dll','msvcp140.dll','vcruntime140.dll')) {
     if (!(Test-Path (Join-Path $stage $required))) { throw "Incomplete deployment: $required" }
 }
+Copy-Item -LiteralPath "$PSScriptRoot/docs" -Destination $stage -Recurse
 $visualizerBuild = Join-Path $PSScriptRoot 'integration/spectral-grid/build'
 if (!(Test-Path "$visualizerBuild/Release/SpectralGrid.exe")) { throw 'Build the visualizer before packaging.' }
 $cmakeCommand = "$PSScriptRoot/.tools/python/cmake/data/bin/cmake.exe"
