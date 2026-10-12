@@ -1,0 +1,13 @@
+/.tools/
+/backups/
+/staryprojekt/
+/build/
+/dist/
+**/build/
+**/dist/
+**/test-output/
+*.user
+*.zip
+*.log
+/test-results.txt
+/scripts/sync_visualizer.py

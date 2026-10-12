@@ -1,0 +1,36 @@
+﻿#include "Core.h"
+#include "WaveformGenerator.h"
+#include <QtTest>
+#include <QTemporaryDir>
+#include <QFile>
+#include <QDataStream>
+#include <QtConcurrent>
+
+static CancelFlag flag(bool cancelled=false){return std::make_shared<std::atomic_bool>(cancelled);}
+static void writeFile(const QString &path,const QByteArray &bytes){QFile f(path);if(f.open(QIODevice::WriteOnly))f.write(bytes);}
+static QByteArray readFile(const QString &path){QFile f(path);if(!f.open(QIODevice::ReadOnly))return {};return f.readAll();}
+static void makeWave(const QString &path,int frames){
+    QFile f(path);if(!f.open(QIODevice::WriteOnly))qFatal("Cannot write test fixture");QDataStream s(&f);s.setByteOrder(QDataStream::LittleEndian);
+    s.writeRawData("RIFF",4);s<<quint32(36+frames*4);s.writeRawData("WAVEfmt ",8);s<<quint32(16)<<quint16(1)<<quint16(2)<<quint32(48000)<<quint32(192000)<<quint16(4)<<quint16(16);s.writeRawData("data",4);s<<quint32(frames*4);
+    for(int i=0;i<frames;++i){s<<qint16(i<frames/2?8000:16000)<<qint16(i<frames/2?-8000:-16000);}
+}
+class CoreTests : public QObject {
+    Q_OBJECT
+private slots:
+    void initTestCase(){QCoreApplication::setApplicationName("MusicSorterTests");QStandardPaths::setTestModeEnabled(true);qputenv("QT_MEDIA_BACKEND","ffmpeg");}
+    void cursorPosition(){QCOMPARE(Logic::fraction(-3,10,100),0.0);QCOMPARE(Logic::fraction(60,10,100),0.5);QCOMPARE(Logic::fraction(300,10,100),1.0);QCOMPARE(Logic::fraction(5,0,0),0.0);QCOMPARE(Logic::position(0.25,8000),2000);QCOMPARE(Logic::position(0.5,-1),0);}
+    void hitTesting(){for(int c:{1,4,8})for(int w:{161,800,1537})for(int scroll:{0,37,2000})for(int i=0;i<5000;i+=19){auto r=Logic::cardRect(i,c,w,scroll);QCOMPARE(r.height(),40);QCOMPARE(Logic::hitTest(r.center(),c,w,scroll,5000),i);QCOMPARE(Logic::hitTest(QPoint(r.left(),r.bottom()+1),c,w,scroll,5000),-1);}QCOMPARE(Logic::hitTest({-1,5},4,800,0,5000),-1);QCOMPARE(Logic::hitTest({10,10},4,800,0,0),-1);}
+    void normalization(){Logic::WaveAccumulator a(600);for(int i=0;i<600;++i)a.add(i<300?-0.25:0.5);auto w=a.normalized();QCOMPARE(w.size(),300);QCOMPARE(w[0],0.5f);QCOMPARE(w[299],1.0f);Logic::WaveAccumulator silent(0);QCOMPARE(silent.normalized(),QVector<float>(300,0));Logic::WaveAccumulator shortFile(1);shortFile.add(0.1);QCOMPARE(shortFile.normalized()[0],1.0f);}
+    void configRoundTrip(){QTemporaryDir d;ConfigManager c(d.filePath("nested/config.json"));QVERIFY(c.load());c.categories[1]={"Żółć", "C:/Muzyka/Łódź"};QVERIFY(c.save());ConfigManager restored(c.path);QVERIFY(restored.load());QCOMPARE(restored.categories[1].label,c.categories[1].label);QCOMPARE(restored.categories[1].directory,c.categories[1].directory);writeFile(c.path,"{broken");QString error;QVERIFY(!restored.load(&error));QVERIFY(!error.isEmpty());QCOMPARE(restored.categories[1].label,c.categories[1].label);writeFile(c.path,"{}");QVERIFY(!restored.load());}
+    void copying(){QTemporaryDir d;QString src=d.filePath("Źródło.wav"),dest=d.filePath("out");writeFile(src,"original payload");auto a=FileSorter::copy(src,dest,flag());QVERIFY2(a.success,qPrintable(a.error));auto b=FileSorter::copy(src,dest,flag());QVERIFY(b.success);QVERIFY(b.destination.endsWith("Źródło (1).wav"));QCOMPARE(readFile(src),QByteArray("original payload"));QCOMPARE(readFile(a.destination),readFile(src));QCOMPARE(readFile(b.destination),readFile(src));QVERIFY(!FileSorter::copy(src,"",flag()).success);QVERIFY(!FileSorter::copy(d.filePath("missing"),dest,flag()).success);QVERIFY(!FileSorter::copy(src,dest,flag(true)).success);QCOMPARE(QDir(dest).entryList({"*.part"},QDir::Files|QDir::Hidden).size(),0);auto same=FileSorter::copy(src,d.path(),flag());QVERIFY(same.success);QVERIFY(same.destination!=src);}
+    void collisionRace(){QTemporaryDir d;auto src=d.filePath("song.mp3");writeFile(src,QByteArray(200000,'x'));QVector<QFuture<CopyResult>> futures;for(int i=0;i<8;++i)futures<<QtConcurrent::run(&FileSorter::copy,src,d.filePath("out"),flag());QSet<QString> paths;for(auto &f:futures){auto r=f.result();QVERIFY2(r.success,qPrintable(r.error));paths.insert(r.destination);QCOMPARE(readFile(r.destination),readFile(src));}QCOMPARE(paths.size(),8);}
+    void lockTransitions(){Logic::PlaybackState s;QVERIFY(s.hover(2));QVERIFY(!s.click(2));QCOMPARE(s.locked,2);QVERIFY(!s.hover(5));QCOMPARE(s.active,2);s.leave();QCOMPARE(s.active,2);QVERIFY(!s.click(2));QCOMPARE(s.locked,-1);s.leave();QCOMPARE(s.active,-1);s.hover(3);s.click(3);QVERIFY(s.click(4));QCOMPARE(s.active,4);QCOMPARE(s.locked,4);s.stop();QCOMPARE(s.active,-1);}
+    void copyState(){Track t;QVERIFY(t.beginCopy());QVERIFY(!t.beginCopy());t.finishCopy(false,"OK");QVERIFY(!t.sorted);QVERIFY(t.beginCopy());t.finishCopy(true,"OK");QVERIFY(t.sorted);QCOMPARE(t.category,QString("OK"));QVERIFY(!t.beginCopy());}
+    void scanAndStaleResults(){QTemporaryDir first,second;writeFile(first.filePath("Track10.MP3"),"x");writeFile(first.filePath("track2.wav"),"x");writeFile(first.filePath("ignore.txt"),"x");QDir().mkpath(first.filePath("child"));writeFile(first.filePath("child/nested.mp3"),"x");auto r=scanDirectory(first.path(),flag());QCOMPARE(r.tracks.size(),2);QCOMPARE(r.tracks[0].name,QString("track2"));writeFile(second.filePath("fresh.flac"),"x");TrackModel m;m.load(first.path());m.load(second.path());QTRY_COMPARE_WITH_TIMEOUT(m.tracks.size(),1,5000);QCOMPARE(m.tracks[0].name,QString("fresh"));QTest::qWait(100);QCOMPARE(m.tracks.size(),1);}
+    void decoderAndCache(){QTemporaryDir d;auto file=d.filePath("stereo.wav");makeWave(file,48000);auto w=WaveformGenerator::analyze(file,flag());QVERIFY2(w.error.isEmpty(),qPrintable(w.error));QCOMPARE(w.values.size(),300);QCOMPARE(w.duration,1000);QVERIFY(std::abs(w.values[20]-0.5f)<0.01);QCOMPARE(w.values[250],1.0f);auto key=WaveformCache::key(file);QVERIFY2(QFileInfo::exists(key),qPrintable(key)); QCOMPARE(QFileInfo(key).size(),qint64(1248)); QCOMPARE(WaveformCache::read(key).values,w.values);writeFile(key,"corrupt");QVERIFY(WaveformCache::read(key).values.isEmpty());makeWave(file,1);QVERIFY(WaveformCache::key(file)!=key);auto shortWave=WaveformGenerator::analyze(file,flag());QVERIFY2(shortWave.error.isEmpty(),qPrintable(shortWave.error));QCOMPARE(shortWave.values.size(),300);makeWave(file,0);auto empty=WaveformGenerator::analyze(file,flag());QVERIFY(!empty.error.isEmpty());writeFile(file,"not audio");auto broken=WaveformGenerator::analyze(file,flag());QVERIFY(!broken.error.isEmpty());QVERIFY(WaveformGenerator::analyze(file,flag(true)).values.isEmpty());}
+    void staleWaveform(){QTemporaryDir d;makeWave(d.filePath("old.wav"),480000);TrackModel m;WaveformGenerator generator(&m);m.load(d.path());QTRY_COMPARE(m.tracks.size(),1);QTemporaryDir empty;m.load(empty.path());QTest::qWait(300);QCOMPARE(m.tracks.size(),0);}
+    void allFormats_data(){QTest::addColumn<QString>("extension");for(const char *format:{"wav","mp3","flac","ogg","m4a","aac","opus"})QTest::newRow(format)<<QString(format);}
+    void allFormats(){QFETCH(QString,extension);auto data=WaveformGenerator::analyze(QString(FIXTURE_DIR)+"/tone."+extension,flag());QVERIFY2(data.error.isEmpty(),qPrintable(data.error));QCOMPARE(data.values.size(),300);QVERIFY(data.duration>=900&&data.duration<=1200);QCOMPARE(*std::max_element(data.values.begin(),data.values.end()),1.0f);}
+};
+QTEST_GUILESS_MAIN(CoreTests)
+#include "CoreTests.moc"

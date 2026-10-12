@@ -1,0 +1,5 @@
+qtbase 6.10.2: https://github.com/qt/qtbase/archive/refs/tags/v6.10.2.zip
+qtmultimedia 6.10.2: https://github.com/qt/qtmultimedia/archive/refs/tags/v6.10.2.zip
+qtsvg 6.10.2: https://github.com/qt/qtsvg/archive/refs/tags/v6.10.2.zip
+FFmpeg 7.1.2: https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n7.1.2.zip
+Qt FFmpeg build scripts: https://code.qt.io/cgit/qt/qt5.git/tree/coin/provisioning/common?h=v6.10.2
