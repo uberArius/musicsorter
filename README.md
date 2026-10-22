@@ -12,6 +12,8 @@ Developed with the assistance of ChatGPT / Codex.
 
 *The screenshot shows an earlier Polish interface. The current release uses English.*
 
+[Watch the video demo on YouTube](https://www.youtube.com/watch?v=EI1nQ3eahcU)
+
 ## Features
 
 - Audition any part of a track by moving the pointer across its waveform.
